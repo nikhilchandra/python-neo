@@ -407,8 +407,8 @@ class PyPL2FileReader:
             zero_based_channel_index - zero based channel index
 
         Returns:
-            fragment_timestamps - array the size of PL2AnalogChannelInfo.m_MaximumNumberOfFragments
-            fragment_counts - array the size of PL2AnalogChannelInfo.m_MaximumNumberOfFragments
+            fragment_timestamps - array the size of num_fragments_returned
+            fragment_counts - array the size of num_fragments_returned
             values - array the size of PL2AnalogChannelInfo.m_NumberOfValues
         """
 
@@ -449,8 +449,12 @@ class PyPL2FileReader:
         if not result:
             self._print_error()
             return None
+        
+        fragment_timestamps = to_array(fragment_timestamps)[:num_fragments_returned.value]
+        fragment_counts = to_array(fragment_counts)[:num_fragments_returned.value]
+        values = to_array(values)
 
-        return to_array(fragment_timestamps), to_array(fragment_counts), to_array(values)
+        return fragment_timestamps, fragment_counts, values
 
     def pl2_get_analog_channel_data_subset(self):
         pass
@@ -463,8 +467,8 @@ class PyPL2FileReader:
             channel_name - analog channel name
 
         Returns:
-            fragment_timestamps - array the size of PL2AnalogChannelInfo.m_MaximumNumberOfFragments
-            fragment_counts - array the size of PL2AnalogChannelInfo.m_MaximumNumberOfFragments
+            fragment_timestamps - array the size of num_fragments_returned
+            fragment_counts - array the size of num_fragments_returned
             values - array the size of PL2AnalogChannelInfo.m_NumberOfValues
         """
 
@@ -512,8 +516,12 @@ class PyPL2FileReader:
         if not result:
             self._print_error()
             return None
+        
+        fragment_timestamps = to_array(fragment_timestamps)[:num_fragments_returned.value]
+        fragment_counts = to_array(fragment_counts)[:num_fragments_returned.value]
+        values = to_array(values)
 
-        return to_array(fragment_timestamps), to_array(fragment_counts), to_array(values)
+        return fragment_timestamps, fragment_counts, values
 
     def pl2_get_analog_channel_data_by_source(self, source_id, one_based_channel_index_in_source):
         """
@@ -524,8 +532,8 @@ class PyPL2FileReader:
             one_based_channel_index_in_source - one-based channel index within the source
 
         Returns:
-            fragment_timestamps - array the size of PL2AnalogChannelInfo.m_MaximumNumberOfFragments
-            fragment_counts - array the size of PL2AnalogChannelInfo.m_MaximumNumberOfFragments
+            fragment_timestamps - array the size of num_fragments_returned
+            fragment_counts - array the size of num_fragments_returned
             values - array the size of PL2AnalogChannelInfo.m_NumberOfValues
         """
 
@@ -568,8 +576,12 @@ class PyPL2FileReader:
         if not result:
             self._print_error()
             return None
+        
+        fragment_timestamps = to_array(fragment_timestamps)[:num_fragments_returned.value]
+        fragment_counts = to_array(fragment_counts)[:num_fragments_returned.value]
+        values = to_array(values)
 
-        return to_array(fragment_timestamps), to_array(fragment_counts), to_array(values)
+        return fragment_timestamps, fragment_counts, values
 
     def pl2_get_spike_channel_info(self, zero_based_channel_index):
         """
