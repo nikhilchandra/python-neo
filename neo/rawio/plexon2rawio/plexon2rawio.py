@@ -31,7 +31,7 @@ from urllib.request import urlopen
 from datetime import datetime
 
 import numpy as np
-
+from enum import Enum
 
 from ..baserawio import (
     BaseRawIO,
@@ -54,6 +54,16 @@ _signal_segments_info_dtype = [
     ("segment_start_tick", "i8"),
     ("segment_nb_ticks", "u8"),
 ]
+
+class _StartStopEvent(Enum):
+    STOP = 0
+    START = 1
+    PAUSE = 2
+    RESUME = 3
+
+class _StartStopState(Enum):
+    OFF = 0
+    ON = 1
 
 class Plexon2RawIO(BaseRawIO):
     """
@@ -296,10 +306,31 @@ class Plexon2RawIO(BaseRawIO):
 
         event_channels = np.array(event_channels, dtype=_event_channel_dtype)
 
+        # getting segment start and stop times for use with _segment_t_start and _segment_t_stop functions
+        _, event_timestamps, event_values = self.pl2reader.pl2_get_start_stop_channel_data()
+        SSE = _StartStopEvent
+        SSS = _StartStopState
+        current_state = SSS.OFF
+        segment_start_ticks = []
+        segment_stop_ticks = []
+        for event_timestamp, event_value in zip(event_timestamps, event_values):
+            if current_state == SSS.OFF and event_value in (SSE.START.value, SSE.RESUME.value):
+                current_state = SSS.ON
+                segment_start_ticks.append(event_timestamp)
+            
+            elif current_state == SSS.ON and event_value in (SSE.STOP.value, SSE.PAUSE.value):
+                current_state = SSS.OFF
+                segment_stop_ticks.append(event_timestamp)
+        
+        assert len(segment_start_ticks) == len(segment_stop_ticks), "The number of start and stop ticks should be equal."
+            
+        self._segment_ticks = [(segment_start_tick, segment_stop_tick) for segment_start_tick, segment_stop_tick in zip(segment_start_ticks, segment_stop_ticks)]
+        nb_segment = len(self._segment_ticks)
+
         # fill into header dict
         self.header = {}
         self.header["nb_block"] = 1
-        self.header["nb_segment"] = [1]  # It seems pl2 can only contain a single segment
+        self.header["nb_segment"] = [nb_segment]
         self.header["signal_buffers"] = signal_buffers
         self.header["signal_streams"] = signal_streams
         self.header["signal_channels"] = signal_channels
@@ -412,14 +443,17 @@ class Plexon2RawIO(BaseRawIO):
 
     def _segment_t_start(self, block_index, seg_index):
         # this must return a float values in seconds
-        return self.pl2reader.pl2_file_info.m_StartRecordingTime / self.pl2reader.pl2_file_info.m_TimestampFrequency
+        start_recording_tick = self.pl2reader.pl2_file_info.m_StartRecordingTime
+        segment_start_tick, _ = self._segment_ticks[seg_index]
+        sampling_frequency = self.pl2reader.pl2_file.m_TimestampFrequency
+        return (start_recording_tick + segment_start_tick) / sampling_frequency
 
     def _segment_t_stop(self, block_index, seg_index):
         # this must return a float value in seconds
-        end_time = (
-            self.pl2reader.pl2_file_info.m_StartRecordingTime + self.pl2reader.pl2_file_info.m_DurationOfRecording
-        )
-        return float(end_time / self.pl2reader.pl2_file_info.m_TimestampFrequency)
+        start_recording_tick = self.pl2_file_info.m_StartRecordingTime
+        _, segment_stop_tick = self._segment_ticks[seg_index]
+        sampling_frequency = self.pl2reader.pl2_file.m_TimestampFrequency
+        return (start_recording_tick + segment_stop_tick) / sampling_frequency
 
     def _get_signal_size(self, block_index, seg_index, stream_index):
         stream_id = self._stream_index_to_stream_id[stream_index]
