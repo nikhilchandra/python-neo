@@ -42,6 +42,18 @@ from ..baserawio import (
     _event_channel_dtype,
 )
 
+# overwrite base _signal_channel_dtype because
+# subset function for analog data only works
+# with zero-based channel indices and we need to 
+# store these somewhere
+_signal_channel_dtype += [
+    ("zero_based_channel_index", "i4") # for use with analog (signal) channels
+]
+
+_signal_segments_info_dtype = [
+    ("segment_start_tick", "i8"),
+    ("segment_nb_ticks", "u8"),
+]
 
 class Plexon2RawIO(BaseRawIO):
     """
@@ -185,7 +197,7 @@ class Plexon2RawIO(BaseRawIO):
             channel_prefix = re.match(regex_prefix_pattern, ch_name).group(0)
             stream_id = channel_prefix
             buffer_id = ""
-            signal_channels.append((ch_name, chan_id, rate, dtype, units, gain, offset, stream_id, buffer_id))
+            signal_channels.append((ch_name, chan_id, rate, dtype, units, gain, offset, stream_id, buffer_id, channel_index))
 
         signal_channels = np.array(signal_channels, dtype=_signal_channel_dtype)
         channel_num_samples = np.array(channel_num_samples)
@@ -225,6 +237,17 @@ class Plexon2RawIO(BaseRawIO):
             signal_num_samples = np.unique(channel_num_samples[mask])
             assert signal_num_samples.size == 1, "All channels in a stream must have the same number of samples"
             self._stream_id_samples[stream_id] = signal_num_samples[0]
+        
+        # Retrieval of segment-related information for signal streams requires 
+        # pulling one channels' worth of data for each stream
+        self._stream_id_segments_info_cache = {}
+        for stream_id in signal_streams["id"]:
+            # pick the first available channel
+            signal_channel = signal_channels[signal_channels["stream_id"]==stream_id][0]
+            zbci = signal_channel["zero_based_channel_index"]
+            fragment_timestamps, fragment_counts, _ = self.pl2reader.pl2_get_analog_channel_data(zbci)
+            segments_info = [(timestamp, count) for timestamp, count in zip(fragment_timestamps, fragment_counts)]
+            self._stream_id_segments_info_cache[stream_id] = np.asarray(segments_info, dtype=_signal_segments_info_dtype)
 
         # pre-loading spike channel_data for later usage
         self._spike_channel_cache = {}
@@ -400,14 +423,19 @@ class Plexon2RawIO(BaseRawIO):
 
     def _get_signal_size(self, block_index, seg_index, stream_index):
         stream_id = self._stream_index_to_stream_id[stream_index]
-        num_samples = int(self._stream_id_samples[stream_id])
+        num_samples = self._stream_id_segments_info_cache[stream_id][seg_index]["segment_nb_ticks"]
         return num_samples
 
     def _get_signal_t_start(self, block_index, seg_index, stream_index):
         # This returns the t_start of signals as a float value in seconds
 
         # TODO: Does the fragment_timestamp[0] need to be added here for digital signals?
-        return self._segment_t_start(block_index, seg_index)
+        stream_id = self._stream_index_to_stream_id[stream_index]
+        start_recording_tick = self.pl2reader.pl2_file_info.m_StartRecordingTime
+        sampling_frequency = self.pl2reader.pl2_file.m_TimestampFrequency
+        segment_start_tick = self._stream_id_segments_info_cache[stream_id][seg_index]["segment_start_tick"]
+        
+        return (start_recording_tick + segment_start_tick) / sampling_frequency
 
     def _get_analogsignal_chunk(self, block_index, seg_index, i_start, i_stop, stream_index, channel_indexes):
         # this must return a signal chunk in a signal stream
@@ -424,15 +452,15 @@ class Plexon2RawIO(BaseRawIO):
         stream_channels = self.header["signal_channels"][mask]
 
         n_channels = len(stream_channels)
-        n_samples = self.get_signal_size(block_index, seg_index, stream_index)
+        n_samples_in_segment = self.get_signal_size(block_index, seg_index, stream_index)
 
         if i_start is None:
             i_start = 0
         if i_stop is None:
-            i_stop = n_samples
+            i_stop = int(n_samples_in_segment)
 
-        if i_start < 0 or i_stop > n_samples:
-            raise IndexError(f"Indexes ({i_start}, {i_stop}) out of range for signal with {n_samples} samples")
+        if i_start < 0 or i_stop > n_samples_in_segment:
+            raise IndexError(f"Indexes ({i_start}, {i_stop}) out of range for signal with {n_samples_in_segment} samples")
 
         # converting channel_indexes to array representation
         if channel_indexes is None:
@@ -452,22 +480,16 @@ class Plexon2RawIO(BaseRawIO):
         for i, channel_idx in enumerate(channel_indexes):
             channel_name = stream_channels["name"][channel_idx]
 
-            # use previously loaded channel data if possible
-            if channel_name in self._analogsignal_cache:
-                values = self._analogsignal_cache[channel_name]
-            else:
-                res = self.pl2reader.pl2_get_analog_channel_data_by_name(channel_name)
-                fragment_timestamps, fragment_counts, values = res
-                self._analogsignal_cache[channel_name] = values
+            # load subset for current channel
+            zero_based_channel_index = stream_channels["zero_based_channel_index"][channel_idx]
+            segment_start_tick = self._stream_id_segments_info_cache[stream_id][seg_index]["segment_start_tick"]
+            zero_based_start_value_index = segment_start_tick + i_start
+            num_subset_values = i_stop - i_start
+            _, _, values = self.pl2reader.pl2_get_analog_channel_data_subset(zero_based_channel_index, zero_based_start_value_index, num_subset_values)
 
-            raw_signals[:, i] = values[i_start:i_stop]
+            raw_signals[:, i] = values
 
         return raw_signals
-
-    def clear_analogsignal_cache(self):
-        for channel_name, values in self._analogsignal_cache.items():
-            del values
-        self._analogsignal_cache = {}
 
     def _spike_count(self, block_index, seg_index, spike_channel_index):
         channel_header = self.header["spike_channels"][spike_channel_index]
