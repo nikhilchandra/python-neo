@@ -445,14 +445,14 @@ class Plexon2RawIO(BaseRawIO):
         # this must return a float values in seconds
         start_recording_tick = self.pl2reader.pl2_file_info.m_StartRecordingTime
         segment_start_tick, _ = self._segment_ticks[seg_index]
-        sampling_frequency = self.pl2reader.pl2_file.m_TimestampFrequency
+        sampling_frequency = self.pl2reader.pl2_file_info.m_TimestampFrequency
         return (start_recording_tick + segment_start_tick) / sampling_frequency
 
     def _segment_t_stop(self, block_index, seg_index):
         # this must return a float value in seconds
         start_recording_tick = self.pl2_file_info.m_StartRecordingTime
         _, segment_stop_tick = self._segment_ticks[seg_index]
-        sampling_frequency = self.pl2reader.pl2_file.m_TimestampFrequency
+        sampling_frequency = self.pl2reader.pl2_file_info.m_TimestampFrequency
         return (start_recording_tick + segment_stop_tick) / sampling_frequency
 
     def _get_signal_size(self, block_index, seg_index, stream_index):
@@ -466,7 +466,7 @@ class Plexon2RawIO(BaseRawIO):
         # TODO: Does the fragment_timestamp[0] need to be added here for digital signals?
         stream_id = self._stream_index_to_stream_id[stream_index]
         start_recording_tick = self.pl2reader.pl2_file_info.m_StartRecordingTime
-        sampling_frequency = self.pl2reader.pl2_file.m_TimestampFrequency
+        sampling_frequency = self.pl2reader.pl2_file_info.m_TimestampFrequency
         segment_start_tick = self._stream_id_segments_info_cache[stream_id][seg_index]["segment_start_tick"]
         
         return (start_recording_tick + segment_start_tick) / sampling_frequency
